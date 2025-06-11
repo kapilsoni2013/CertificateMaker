@@ -1,6 +1,7 @@
 import React, { useState, useRef, useContext, useEffect } from 'react';
 import { Container, Form, Button, Card, ListGroup, Modal, Row, Col, Spinner, Alert } from 'react-bootstrap';
 import { AppContext } from '../context/AppContext';
+import CanvasEditor from '../components/CanvasEditor';
 
 const TemplateManager = () => {
   const { templates, addTemplate, updateTemplate, deleteTemplate } = useContext(AppContext);
@@ -8,28 +9,17 @@ const TemplateManager = () => {
   const [templateImage, setTemplateImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [regions, setRegions] = useState([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [isMoving, setIsMoving] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeHandle, setResizeHandle] = useState(null);
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [endPos, setEndPos] = useState({ x: 0, y: 0 });
+  const [selectedRegion, setSelectedRegion] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [regionName, setRegionName] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [currentId, setCurrentId] = useState(null);
-  const [selectedRegion, setSelectedRegion] = useState(null);
   const [validated, setValidated] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState(null);
   const [editingRegion, setEditingRegion] = useState(null);
   
-  const canvasRef = useRef(null);
   const imageRef = useRef(null);
-  const containerRef = useRef(null);
 
   useEffect(() => {
     if (imagePreview && imageRef.current) {
@@ -54,8 +44,6 @@ const TemplateManager = () => {
     setEditMode(false);
     setCurrentId(null);
     setValidated(false);
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
     setSelectedRegion(null);
   };
 
@@ -79,242 +67,25 @@ const TemplateManager = () => {
     }
   };
 
-  // Convert screen coordinates to image coordinates
-  const screenToImageCoords = (x, y) => {
-    const rect = containerRef.current.getBoundingClientRect();
-    const scaleX = imageRef.current.naturalWidth / (imageRef.current.width * zoom);
-    const scaleY = imageRef.current.naturalHeight / (imageRef.current.height * zoom);
-    
-    return {
-      x: (x - rect.left - pan.x) * scaleX / zoom,
-      y: (y - rect.top - pan.y) * scaleY / zoom
-    };
-  };
-
-  // Convert image coordinates to screen coordinates
-  const imageToScreenCoords = (x, y) => {
-    if (!imageRef.current) return { x: 0, y: 0 };
-    
-    const scaleX = imageRef.current.width * zoom / imageRef.current.naturalWidth;
-    const scaleY = imageRef.current.height * zoom / imageRef.current.naturalHeight;
-    
-    return {
-      x: x * scaleX * zoom + pan.x,
-      y: y * scaleY * zoom + pan.y
-    };
-  };
-
-  // Check if point is inside region
-  const isPointInRegion = (x, y, region) => {
-    const imageWidth = imageRef.current.naturalWidth;
-    const imageHeight = imageRef.current.naturalHeight;
-    
-    const regionLeft = region.coordinates.x1 * imageWidth;
-    const regionTop = region.coordinates.y1 * imageHeight;
-    const regionRight = region.coordinates.x2 * imageWidth;
-    const regionBottom = region.coordinates.y2 * imageHeight;
-    
-    return x >= regionLeft && x <= regionRight && y >= regionTop && y <= regionBottom;
-  };
-
-  // Check if point is on resize handle
-  const getResizeHandle = (x, y, region) => {
-    const imageWidth = imageRef.current.naturalWidth;
-    const imageHeight = imageRef.current.naturalHeight;
-    const handleSize = 10 / zoom;
-    
-    const handles = [
-      { name: 'topLeft', x: region.coordinates.x1 * imageWidth, y: region.coordinates.y1 * imageHeight },
-      { name: 'topRight', x: region.coordinates.x2 * imageWidth, y: region.coordinates.y1 * imageHeight },
-      { name: 'bottomLeft', x: region.coordinates.x1 * imageWidth, y: region.coordinates.y2 * imageHeight },
-      { name: 'bottomRight', x: region.coordinates.x2 * imageWidth, y: region.coordinates.y2 * imageHeight }
-    ];
-    
-    for (const handle of handles) {
-      if (Math.abs(x - handle.x) <= handleSize && Math.abs(y - handle.y) <= handleSize) {
-        return handle.name;
-      }
-    }
-    
-    return null;
-  };
-
-  // Handle mouse events for region selection, moving, and resizing
-  const handleMouseDown = (e) => {
-    if (!imagePreview || imageLoading) return;
-    
-    // Right click for panning
-    if (e.button === 2) {
-      e.preventDefault();
-      setIsPanning(true);
-      setStartPos({ x: e.clientX, y: e.clientY });
-      return;
-    }
-    
-    const coords = screenToImageCoords(e.clientX, e.clientY);
-    
-    // Check if we're clicking on an existing region for selection or resize
-    let clickedRegion = null;
-    let handle = null;
-    
-    for (const region of regions) {
-      handle = getResizeHandle(coords.x, coords.y, region);
-      if (handle) {
-        clickedRegion = region;
-        break;
-      }
-      
-      if (isPointInRegion(coords.x, coords.y, region)) {
-        clickedRegion = region;
-      }
-    }
-    
-    if (handle && clickedRegion) {
-      setIsResizing(true);
-      setResizeHandle(handle);
-      setSelectedRegion(clickedRegion.id);
-      setStartPos(coords);
-    } else if (clickedRegion) {
-      setIsMoving(true);
-      setSelectedRegion(clickedRegion.id);
-      setStartPos(coords);
-    } else {
-      setIsDrawing(true);
-      setStartPos(coords);
-      setEndPos(coords);
-      setSelectedRegion(null);
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    if (!imageRef.current) return;
-    
-    if (isPanning) {
-      const dx = e.clientX - startPos.x;
-      const dy = e.clientY - startPos.y;
-      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-      setStartPos({ x: e.clientX, y: e.clientY });
-      return;
-    }
-    
-    const coords = screenToImageCoords(e.clientX, e.clientY);
-    
-    if (isDrawing) {
-      setEndPos(coords);
-    } else if (isMoving && selectedRegion !== null) {
-      const region = regions.find(r => r.id === selectedRegion);
-      if (!region) return;
-      
-      const dx = coords.x - startPos.x;
-      const dy = coords.y - startPos.y;
-      const imageWidth = imageRef.current.naturalWidth;
-      const imageHeight = imageRef.current.naturalHeight;
-      
-      let newX1 = region.coordinates.x1 + dx / imageWidth;
-      let newY1 = region.coordinates.y1 + dy / imageHeight;
-      let newX2 = region.coordinates.x2 + dx / imageWidth;
-      let newY2 = region.coordinates.y2 + dy / imageHeight;
-      
-      // Ensure the region stays within the image bounds
-      if (newX1 < 0) {
-        newX2 -= newX1;
-        newX1 = 0;
-      }
-      if (newY1 < 0) {
-        newY2 -= newY1;
-        newY1 = 0;
-      }
-      if (newX2 > 1) {
-        newX1 -= (newX2 - 1);
-        newX2 = 1;
-      }
-      if (newY2 > 1) {
-        newY1 -= (newY2 - 1);
-        newY2 = 1;
-      }
-      
-      setRegions(regions.map(r => 
-        r.id === selectedRegion 
-          ? { ...r, coordinates: { x1: newX1, y1: newY1, x2: newX2, y2: newY2 } } 
-          : r
-      ));
-      setStartPos(coords);
-    } else if (isResizing && selectedRegion !== null && resizeHandle) {
-      const region = regions.find(r => r.id === selectedRegion);
-      if (!region) return;
-      
-      const imageWidth = imageRef.current.naturalWidth;
-      const imageHeight = imageRef.current.naturalHeight;
-      
-      let newCoords = { ...region.coordinates };
-      
-      if (resizeHandle.includes('top')) {
-        newCoords.y1 = Math.min(Math.max(0, coords.y / imageHeight), newCoords.y2 - 0.01);
-      }
-      if (resizeHandle.includes('bottom')) {
-        newCoords.y2 = Math.min(Math.max(newCoords.y1 + 0.01, coords.y / imageHeight), 1);
-      }
-      if (resizeHandle.includes('Left')) {
-        newCoords.x1 = Math.min(Math.max(0, coords.x / imageWidth), newCoords.x2 - 0.01);
-      }
-      if (resizeHandle.includes('Right')) {
-        newCoords.x2 = Math.min(Math.max(newCoords.x1 + 0.01, coords.x / imageWidth), 1);
-      }
-      
-      setRegions(regions.map(r => 
-        r.id === selectedRegion 
-          ? { ...r, coordinates: newCoords } 
-          : r
-      ));
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (isDrawing && Math.abs(endPos.x - startPos.x) > 10 && Math.abs(endPos.y - startPos.y) > 10) {
-      // Calculate normalized coordinates (0-1) for responsive positioning
-      const imageWidth = imageRef.current.naturalWidth;
-      const imageHeight = imageRef.current.naturalHeight;
-      
-      const newRegion = {
-        id: Date.now(),
-        name: "",
-        coordinates: {
-          x1: Math.min(startPos.x, endPos.x) / imageWidth,
-          y1: Math.min(startPos.y, endPos.y) / imageHeight,
-          x2: Math.max(startPos.x, endPos.x) / imageWidth,
-          y2: Math.max(startPos.y, endPos.y) / imageHeight
-        }
-      };
-      
-      setRegions([...regions, newRegion]);
-      setSelectedRegion(newRegion.id);
-      setEditingRegion(newRegion);
-      setShowModal(true);
-    }
-    
-    setIsDrawing(false);
-    setIsMoving(false);
-    setIsResizing(false);
-    setIsPanning(false);
-    setResizeHandle(null);
-  };
-
-  const handleZoom = (factor) => {
-    setZoom(prev => {
-      const newZoom = Math.max(0.1, Math.min(5, prev * factor));
-      return newZoom;
-    });
-  };
-
-  const handleWheel = (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      handleZoom(factor);
-    }
-  };
-
   // Add a new region
+  const handleRegionCreated = (newRegion) => {
+    setRegions([...regions, newRegion]);
+    setSelectedRegion(newRegion.id);
+    setEditingRegion(newRegion);
+    setShowModal(true);
+  };
+
+  // Handle region selection
+  const handleRegionSelected = (id) => {
+    setSelectedRegion(id);
+  };
+
+  // Handle region update (move/resize)
+  const handleRegionUpdated = (updatedRegions) => {
+    setRegions(updatedRegions);
+  };
+
+  // Add a new region name
   const addRegionName = () => {
     if (!regionName.trim()) {
       return;
@@ -388,8 +159,6 @@ const TemplateManager = () => {
     setRegions(template.regions);
     setEditMode(true);
     setCurrentId(template.id);
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
   };
 
   // Delete template
@@ -397,55 +166,6 @@ const TemplateManager = () => {
     if (window.confirm('Are you sure you want to delete this template?')) {
       deleteTemplate(id);
     }
-  };
-
-  // Reset canvas view
-  const resetCanvasView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  };
-
-  const renderRegions = () => {
-    if (!imageRef.current) return null;
-    
-    return regions.map((region) => {
-      const isSelected = region.id === selectedRegion;
-      const imageWidth = imageRef.current.naturalWidth;
-      const imageHeight = imageRef.current.naturalHeight;
-      
-      // Calculate screen coordinates for the region
-      const x1 = imageToScreenCoords(region.coordinates.x1 * imageWidth, 0).x;
-      const y1 = imageToScreenCoords(0, region.coordinates.y1 * imageHeight).y;
-      const x2 = imageToScreenCoords(region.coordinates.x2 * imageWidth, 0).x;
-      const y2 = imageToScreenCoords(0, region.coordinates.y2 * imageHeight).y;
-      
-      return (
-        <div 
-          key={region.id}
-          className={`region-marker ${isSelected ? 'selected' : ''}`}
-          style={{
-            left: x1 + 'px',
-            top: y1 + 'px',
-            width: (x2 - x1) + 'px',
-            height: (y2 - y1) + 'px'
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setSelectedRegion(region.id);
-          }}
-        >
-          <div className="region-name">{region.name || 'Unnamed Region'}</div>
-          {isSelected && (
-            <>
-              <div className="resize-handle top-left"></div>
-              <div className="resize-handle top-right"></div>
-              <div className="resize-handle bottom-left"></div>
-              <div className="resize-handle bottom-right"></div>
-            </>
-          )}
-        </div>
-      );
-    });
   };
 
   return (
@@ -503,76 +223,14 @@ const TemplateManager = () => {
                 <h5 className="mt-4">Define Regions</h5>
                 <p>Click and drag on the image to define regions where text will be placed.</p>
                 
-                <div className="canvas-controls mb-2">
-                  <Button variant="outline-secondary" size="sm" onClick={() => handleZoom(1.2)} className="me-1">
-                    <i className="bi bi-zoom-in"></i> Zoom In
-                  </Button>
-                  <Button variant="outline-secondary" size="sm" onClick={() => handleZoom(0.8)} className="me-1">
-                    <i className="bi bi-zoom-out"></i> Zoom Out
-                  </Button>
-                  <Button variant="outline-secondary" size="sm" onClick={resetCanvasView} className="me-1">
-                    <i className="bi bi-aspect-ratio"></i> Reset View
-                  </Button>
-                  <small className="text-muted ms-2">Tip: Hold right-click to pan, use Ctrl+scroll to zoom</small>
-                </div>
-                
-                <div 
-                  ref={containerRef}
-                  className="canvas-container"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseUp}
-                  onWheel={handleWheel}
-                  onContextMenu={(e) => e.preventDefault()}
-                  style={{ 
-                    overflow: 'hidden',
-                    position: 'relative',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    cursor: isDrawing ? 'crosshair' : isMoving ? 'move' : isResizing ? 'nwse-resize' : 'default'
-                  }}
-                >
-                  <div style={{ 
-                    transform: `scale(${zoom}) translate(${pan.x/zoom}px, ${pan.y/zoom}px)`,
-                    transformOrigin: '0 0'
-                  }}>
-                    <img 
-                      ref={imageRef}
-                      src={imagePreview} 
-                      alt="Certificate Template" 
-                      style={{ 
-                        maxWidth: '100%',
-                        display: 'block'
-                      }}
-                      onDragStart={(e) => e.preventDefault()}
-                    />
-                  </div>
-                  
-                  {isDrawing && (
-                    <div 
-                      className="selection-box"
-                      style={{
-                        left: Math.min(
-                          imageToScreenCoords(startPos.x, 0).x,
-                          imageToScreenCoords(endPos.x, 0).x
-                        ) + 'px',
-                        top: Math.min(
-                          imageToScreenCoords(0, startPos.y).y,
-                          imageToScreenCoords(0, endPos.y).y
-                        ) + 'px',
-                        width: Math.abs(
-                          imageToScreenCoords(startPos.x, 0).x - imageToScreenCoords(endPos.x, 0).x
-                        ) + 'px',
-                        height: Math.abs(
-                          imageToScreenCoords(0, startPos.y).y - imageToScreenCoords(0, endPos.y).y
-                        ) + 'px'
-                      }}
-                    ></div>
-                  )}
-                  
-                  {renderRegions()}
-                </div>
+                <CanvasEditor 
+                  image={imagePreview}
+                  regions={regions}
+                  selectedRegion={selectedRegion}
+                  onRegionCreated={handleRegionCreated}
+                  onRegionSelected={handleRegionSelected}
+                  onRegionsUpdated={handleRegionUpdated}
+                />
                 
                 <div className="region-list mt-3">
                   <Card>
@@ -732,78 +390,6 @@ const TemplateManager = () => {
       </Modal>
 
       <style jsx global>{`
-        .canvas-container {
-          min-height: 400px;
-          background-color: #f8f9fa;
-          overflow: hidden;
-        }
-        
-        .selection-box {
-          position: absolute;
-          border: 2px dashed #007bff;
-          background-color: rgba(0, 123, 255, 0.1);
-          pointer-events: none;
-          z-index: 10;
-        }
-        
-        .region-marker {
-          position: absolute;
-          border: 2px solid rgba(255, 193, 7, 0.8);
-          background-color: rgba(255, 193, 7, 0.1);
-          cursor: move;
-          z-index: 10;
-        }
-        
-        .region-marker.selected {
-          border: 2px solid #28a745;
-          background-color: rgba(40, 167, 69, 0.15);
-          z-index: 11;
-        }
-        
-        .region-name {
-          position: absolute;
-          top: 0;
-          left: 0;
-          padding: 2px 6px;
-          background-color: rgba(0, 0, 0, 0.6);
-          color: white;
-          font-size: 0.8rem;
-          border-radius: 0 0 3px 0;
-          z-index: 1;
-        }
-        
-        .resize-handle {
-          position: absolute;
-          width: 10px;
-          height: 10px;
-          background: white;
-          border: 1px solid #28a745;
-        }
-        
-        .top-left {
-          top: -5px;
-          left: -5px;
-          cursor: nwse-resize;
-        }
-        
-        .top-right {
-          top: -5px;
-          right: -5px;
-          cursor: nesw-resize;
-        }
-        
-        .bottom-left {
-          bottom: -5px;
-          left: -5px;
-          cursor: nesw-resize;
-        }
-        
-        .bottom-right {
-          bottom: -5px;
-          right: -5px;
-          cursor: nwse-resize;
-        }
-        
         .template-image-container {
           position: relative;
           overflow: hidden;
