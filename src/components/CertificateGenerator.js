@@ -3,6 +3,7 @@ import { Container, Form, Button, Card, Row, Col, Alert, Spinner } from 'react-b
 import { AppContext } from '../context/AppContext';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import CertificatePreview from '../components/CertificatePreview';
 
 const CertificateGenerator = () => {
   const { candidates, templates, addCertificate } = useContext(AppContext);
@@ -146,88 +147,6 @@ const CertificateGenerator = () => {
     }
   };
 
-  // Get value for a specific region
-  const getValueForRegion = (region) => {
-    if (!candidate) return '';
-    
-    // For custom fields, return the custom value
-    if (region.type === 'custom') {
-      return customValues[region.name] || region.defaultValue || '';
-    }
-    
-    // Check if it's a direct candidate property
-    if (candidate[region.name] !== undefined) {
-      return candidate[region.name];
-    }
-    
-    // Check if it's a subject
-    const subject = candidate.subjects?.find(s => s.name === region.name);
-    if (subject) {
-      return subject.marks;
-    }
-    
-    // Check if it's a special field like "totalMarks"
-    if (region.name === 'totalMarks') {
-      return candidate.subjects?.reduce((sum, subject) => sum + Number(subject.marks || 0), 0).toString() || '0';
-    }
-    
-    // Check if it's a date field
-    if (region.name === 'currentDate') {
-      return new Date().toLocaleDateString();
-    }
-    
-    // For formatted dates
-    if (region.name === 'formattedDate' && region.format) {
-      const date = new Date();
-      try {
-        return new Intl.DateTimeFormat('en-US', 
-          JSON.parse(region.format || '{"dateStyle":"full"}')
-        ).format(date);
-      } catch (e) {
-        return date.toLocaleDateString();
-      }
-    }
-    
-    return region.defaultValue || '';
-  };
-
-  const getRegionStyle = (region) => {
-    if (!certificateRef.current) return {};
-    
-    const containerWidth = certificateRef.current.offsetWidth;
-    const containerHeight = certificateRef.current.offsetHeight;
-    
-    // Calculate font size based on region height or container size
-    const fontSize = region.fontSize ? 
-      `${region.fontSize}px` : 
-      `${Math.min(containerWidth, containerHeight) * 0.02}px`;
-      
-    return {
-      position: 'absolute',
-      left: (region.coordinates.x1 * 100) + '%',
-      top: (region.coordinates.y1 * 100) + '%',
-      width: ((region.coordinates.x2 - region.coordinates.x1) * 100) + '%',
-      height: ((region.coordinates.y2 - region.coordinates.y1) * 100) + '%',
-      display: 'flex',
-      alignItems: region.verticalAlign || 'center',
-      justifyContent: region.textAlign || 'center',
-      fontSize: fontSize,
-      fontFamily: region.fontFamily || 'Arial',
-      fontWeight: region.fontWeight || 'normal',
-      fontStyle: region.fontStyle || 'normal',
-      textDecoration: region.textDecoration || 'none',
-      color: region.textColor || '#000',
-      textTransform: region.textTransform || 'none',
-      overflow: 'hidden',
-      padding: region.padding || '0',
-      letterSpacing: region.letterSpacing ? `${region.letterSpacing}px` : 'normal',
-      lineHeight: region.lineHeight || 'normal',
-      textShadow: region.textShadow || 'none',
-      transform: region.rotation ? `rotate(${region.rotation}deg)` : 'none',
-      transformOrigin: 'center center'
-    };
-  };
-
   // Render custom value input fields based on template regions
   const renderCustomValueFields = () => {
     if (!template) return null;
@@ -328,32 +247,11 @@ const CertificateGenerator = () => {
           <h3>Generated Certificate</h3>
           <Card>
             <Card.Body>
-              <div 
-                ref={certificateRef} 
-                className="certificate-container position-relative"
-                style={{ width: '100%', maxWidth: '800px', margin: '0 auto' }}
-              >
-                <img 
-                  src={template.image} 
-                  alt="Certificate" 
-                  className="img-fluid w-100"
-                  style={{ display: 'block' }}
+              <div ref={certificateRef} style={{ width: '100%', maxWidth: '800px', margin: '0 auto' }}>
+                <CertificatePreview 
+                  certificate={generatedCertificate}
+                  showBorder={false}
                 />
-                
-                {template.regions.map((region) => {
-                  const value = getValueForRegion(region);
-                  const style = getRegionStyle(region);
-                  
-                  return (
-                    <div 
-                      key={region.id}
-                      className="certificate-text"
-                      style={style}
-                    >
-                      {value}
-                    </div>
-                  );
-                })}
               </div>
               
               <div className="mt-3 d-flex gap-3 align-items-center">
