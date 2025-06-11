@@ -12,6 +12,7 @@ const CertificateGenerator = () => {
   const [error, setError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState('png');
+  const [customValues, setCustomValues] = useState({});
   
   const certificateRef = useRef(null);
 
@@ -25,7 +26,24 @@ const CertificateGenerator = () => {
     setSelectedCandidate('');
     setGeneratedCertificate(null);
     setError('');
+    setCustomValues({});
   }, [templates, candidates]);
+
+  // Reset custom values when template changes
+  useEffect(() => {
+    if (template) {
+      // Initialize custom fields from template
+      const initialCustomValues = {};
+      template.regions
+        .filter(region => region.type === 'custom')
+        .forEach(region => {
+          initialCustomValues[region.name] = region.defaultValue || '';
+        });
+      setCustomValues(initialCustomValues);
+    } else {
+      setCustomValues({});
+    }
+  }, [template]);
 
   // Handle template selection
   const handleTemplateChange = (e) => {
@@ -39,6 +57,15 @@ const CertificateGenerator = () => {
     setSelectedCandidate(e.target.value);
     setGeneratedCertificate(null);
     setError('');
+  };
+
+  // Handle custom value changes
+  const handleCustomValueChange = (name, value) => {
+    setCustomValues(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    setGeneratedCertificate(null);
   };
 
   // Generate certificate
@@ -56,6 +83,7 @@ const CertificateGenerator = () => {
         id: `cert-${Date.now()}`,
         template: template,
         candidate: candidate,
+        customValues: customValues,
         generatedAt: new Date().toISOString()
       };
       
@@ -119,31 +147,48 @@ const CertificateGenerator = () => {
   };
 
   // Get value for a specific region
-  const getValueForRegion = (regionName) => {
+  const getValueForRegion = (region) => {
     if (!candidate) return '';
     
+    // For custom fields, return the custom value
+    if (region.type === 'custom') {
+      return customValues[region.name] || region.defaultValue || '';
+    }
+    
     // Check if it's a direct candidate property
-    if (candidate[regionName] !== undefined) {
-      return candidate[regionName];
+    if (candidate[region.name] !== undefined) {
+      return candidate[region.name];
     }
     
     // Check if it's a subject
-    const subject = candidate.subjects?.find(s => s.name === regionName);
+    const subject = candidate.subjects?.find(s => s.name === region.name);
     if (subject) {
       return subject.marks;
     }
     
     // Check if it's a special field like "totalMarks"
-    if (regionName === 'totalMarks') {
+    if (region.name === 'totalMarks') {
       return candidate.subjects?.reduce((sum, subject) => sum + Number(subject.marks || 0), 0).toString() || '0';
     }
     
     // Check if it's a date field
-    if (regionName === 'currentDate') {
+    if (region.name === 'currentDate') {
       return new Date().toLocaleDateString();
     }
     
-    return '';
+    // For formatted dates
+    if (region.name === 'formattedDate' && region.format) {
+      const date = new Date();
+      try {
+        return new Intl.DateTimeFormat('en-US', 
+          JSON.parse(region.format || '{"dateStyle":"full"}')
+        ).format(date);
+      } catch (e) {
+        return date.toLocaleDateString();
+      }
+    }
+    
+    return region.defaultValue || '';
   };
 
   const getRegionStyle = (region) => {
@@ -169,10 +214,50 @@ const CertificateGenerator = () => {
       fontSize: fontSize,
       fontFamily: region.fontFamily || 'Arial',
       fontWeight: region.fontWeight || 'normal',
+      fontStyle: region.fontStyle || 'normal',
+      textDecoration: region.textDecoration || 'none',
       color: region.textColor || '#000',
       textTransform: region.textTransform || 'none',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      padding: region.padding || '0',
+      letterSpacing: region.letterSpacing ? `${region.letterSpacing}px` : 'normal',
+      lineHeight: region.lineHeight || 'normal',
+      textShadow: region.textShadow || 'none',
+      transform: region.rotation ? `rotate(${region.rotation}deg)` : 'none',
+      transformOrigin: 'center center'
     };
+  };
+
+  // Render custom value input fields based on template regions
+  const renderCustomValueFields = () => {
+    if (!template) return null;
+    
+    const customFields = template.regions.filter(region => region.type === 'custom');
+    
+    if (customFields.length === 0) return null;
+    
+    return (
+      <Card className="mb-4">
+        <Card.Body>
+          <h5>Custom Fields</h5>
+          <Row>
+            {customFields.map(field => (
+              <Col md={6} key={field.id} className="mb-3">
+                <Form.Group>
+                  <Form.Label>{field.label || field.name}</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={customValues[field.name] || ''}
+                    placeholder={field.placeholder || ''}
+                    onChange={(e) => handleCustomValueChange(field.name, e.target.value)}
+                  />
+                </Form.Group>
+              </Col>
+            ))}
+          </Row>
+        </Card.Body>
+      </Card>
+    );
   };
 
   return (
@@ -219,6 +304,8 @@ const CertificateGenerator = () => {
                 </Form.Group>
               </Col>
             </Row>
+
+            {renderCustomValueFields()}
             
             <Button 
               variant="primary" 
@@ -254,7 +341,7 @@ const CertificateGenerator = () => {
                 />
                 
                 {template.regions.map((region) => {
-                  const value = getValueForRegion(region.name);
+                  const value = getValueForRegion(region);
                   const style = getRegionStyle(region);
                   
                   return (
