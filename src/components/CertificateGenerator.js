@@ -1,19 +1,50 @@
-import React, { useState, useContext, useRef } from 'react';
-import { Container, Form, Button, Card, Row, Col, Alert } from 'react-bootstrap';
+import React, { useState, useContext, useRef, useEffect } from 'react';
+import { Container, Form, Button, Card, Row, Col, Alert, Spinner } from 'react-bootstrap';
 import { AppContext } from '../context/AppContext';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import CertificatePreview from '../components/CertificatePreview';
 
 const CertificateGenerator = () => {
-  const { candidates, templates } = useContext(AppContext);
+  const { candidates, templates, addCertificate } = useContext(AppContext);
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState('');
   const [generatedCertificate, setGeneratedCertificate] = useState(null);
   const [error, setError] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState('png');
+  const [customValues, setCustomValues] = useState({});
   
   const certificateRef = useRef(null);
 
   // Find template and candidate objects based on selected IDs
   const template = templates.find(t => t.id === selectedTemplate);
   const candidate = candidates.find(c => c.id === selectedCandidate);
+
+  // Reset when templates or candidates change
+  useEffect(() => {
+    setSelectedTemplate('');
+    setSelectedCandidate('');
+    setGeneratedCertificate(null);
+    setError('');
+    setCustomValues({});
+  }, [templates, candidates]);
+
+  // Reset custom values when template changes
+  useEffect(() => {
+    if (template) {
+      // Initialize custom fields from template
+      const initialCustomValues = {};
+      template.regions
+        .filter(region => region.type === 'custom')
+        .forEach(region => {
+          initialCustomValues[region.name] = region.defaultValue || '';
+        });
+      setCustomValues(initialCustomValues);
+    } else {
+      setCustomValues({});
+    }
+  }, [template]);
 
   // Handle template selection
   const handleTemplateChange = (e) => {
@@ -29,6 +60,15 @@ const CertificateGenerator = () => {
     setError('');
   };
 
+  // Handle custom value changes
+  const handleCustomValueChange = (name, value) => {
+    setCustomValues(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    setGeneratedCertificate(null);
+  };
+
   // Generate certificate
   const handleGenerateCertificate = () => {
     if (!selectedTemplate || !selectedCandidate) {
@@ -37,52 +77,106 @@ const CertificateGenerator = () => {
     }
 
     try {
+      setIsGenerating(true);
+      
       // Create a copy of the template with candidate data
       const certificateData = {
+        id: `cert-${Date.now()}`,
         template: template,
         candidate: candidate,
+        customValues: customValues,
         generatedAt: new Date().toISOString()
       };
       
       setGeneratedCertificate(certificateData);
+      // Add to certificates collection in context
+      addCertificate(certificateData);
       setError('');
     } catch (err) {
       setError('Error generating certificate: ' + err.message);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
-  // Download certificate as image
-  const handleDownload = () => {
+  // Download certificate
+  const handleDownload = async () => {
     if (!certificateRef.current) return;
     
     const certificateElement = certificateRef.current;
     
-    // Use html2canvas to capture the certificate (would need to be added as a dependency)
-    // For this example, we'll just open the image in a new tab
-    window.open(template.image, '_blank');
+    try {
+      setIsGenerating(true);
+      const scale = 2; // Higher scale for better quality
+      const canvas = await html2canvas(certificateElement, {
+        scale: scale,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null
+      });
+      
+      if (downloadFormat === 'png') {
+        // Download as PNG
+        const imgData = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = imgData;
+        link.download = `certificate-${candidate.name}-${new Date().toISOString().slice(0,10)}.png`;
+        link.click();
+      } else if (downloadFormat === 'pdf') {
+        // Download as PDF
+        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+        const pdf = new jsPDF({
+          orientation: 'landscape',
+          unit: 'mm',
+          format: 'a4'
+        });
+        
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+        
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth * ratio, imgHeight * ratio);
+        pdf.save(`certificate-${candidate.name}-${new Date().toISOString().slice(0,10)}.pdf`);
+      }
+    } catch (err) {
+      setError('Error downloading certificate: ' + err.message);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  // Get value for a specific region
-  const getValueForRegion = (regionName) => {
-    if (!candidate) return '';
+  // Render custom value input fields based on template regions
+  const renderCustomValueFields = () => {
+    if (!template) return null;
     
-    // Check if it's a direct candidate property
-    if (candidate[regionName] !== undefined) {
-      return candidate[regionName];
-    }
+    const customFields = template.regions.filter(region => region.type === 'custom');
     
-    // Check if it's a subject
-    const subject = candidate.subjects.find(s => s.name === regionName);
-    if (subject) {
-      return subject.marks;
-    }
+    if (customFields.length === 0) return null;
     
-    // Check if it's a special field like "totalMarks"
-    if (regionName === 'totalMarks') {
-      return candidate.subjects.reduce((sum, subject) => sum + Number(subject.marks || 0), 0).toString();
-    }
-    
-    return '';
+    return (
+      <Card className="mb-4">
+        <Card.Body>
+          <h5>Custom Fields</h5>
+          <Row>
+            {customFields.map(field => (
+              <Col md={6} key={field.id} className="mb-3">
+                <Form.Group>
+                  <Form.Label>{field.label || field.name}</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={customValues[field.name] || ''}
+                    placeholder={field.placeholder || ''}
+                    onChange={(e) => handleCustomValueChange(field.name, e.target.value)}
+                  />
+                </Form.Group>
+              </Col>
+            ))}
+          </Row>
+        </Card.Body>
+      </Card>
+    );
   };
 
   return (
@@ -129,13 +223,20 @@ const CertificateGenerator = () => {
                 </Form.Group>
               </Col>
             </Row>
+
+            {renderCustomValueFields()}
             
             <Button 
               variant="primary" 
               onClick={handleGenerateCertificate}
-              disabled={!selectedTemplate || !selectedCandidate}
+              disabled={!selectedTemplate || !selectedCandidate || isGenerating}
             >
-              Generate Certificate
+              {isGenerating ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                  {' '}Generating...
+                </>
+              ) : 'Generate Certificate'}
             </Button>
           </Form>
         </Card.Body>
@@ -146,42 +247,36 @@ const CertificateGenerator = () => {
           <h3>Generated Certificate</h3>
           <Card>
             <Card.Body>
-              <div ref={certificateRef} className="certificate-container">
-                <img 
-                  src={template.image} 
-                  alt="Certificate" 
-                  className="img-fluid"
+              <div ref={certificateRef} style={{ width: '100%', maxWidth: '800px', margin: '0 auto' }}>
+                <CertificatePreview 
+                  certificate={generatedCertificate}
+                  showBorder={false}
                 />
-                
-                {template.regions.map((region) => {
-                  const value = getValueForRegion(region.name);
-                  const imageWidth = certificateRef.current ? certificateRef.current.offsetWidth : 0;
-                  const imageHeight = certificateRef.current ? certificateRef.current.offsetHeight : 0;
-                  
-                  return (
-                    <div 
-                      key={region.id}
-                      className="certificate-text"
-                      style={{
-                        left: (region.coordinates.x1 * 100) + '%',
-                        top: (region.coordinates.y1 * 100) + '%',
-                        width: ((region.coordinates.x2 - region.coordinates.x1) * 100) + '%',
-                        height: ((region.coordinates.y2 - region.coordinates.y1) * 100) + '%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: Math.min(imageWidth, imageHeight) * 0.02 + 'px'
-                      }}
-                    >
-                      {value}
-                    </div>
-                  );
-                })}
               </div>
               
-              <div className="mt-3">
-                <Button variant="success" onClick={handleDownload}>
-                  Download Certificate
+              <div className="mt-3 d-flex gap-3 align-items-center">
+                <Form.Group className="mb-0">
+                  <Form.Select 
+                    value={downloadFormat} 
+                    onChange={(e) => setDownloadFormat(e.target.value)}
+                    style={{ width: '120px' }}
+                  >
+                    <option value="png">PNG Image</option>
+                    <option value="pdf">PDF Document</option>
+                  </Form.Select>
+                </Form.Group>
+                
+                <Button 
+                  variant="success" 
+                  onClick={handleDownload}
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? (
+                    <>
+                      <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                      {' '}Downloading...
+                    </>
+                  ) : `Download as ${downloadFormat.toUpperCase()}`}
                 </Button>
               </div>
             </Card.Body>

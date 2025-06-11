@@ -1,6 +1,7 @@
 import React, { useState, useRef, useContext, useEffect } from 'react';
-import { Container, Form, Button, Card, ListGroup, Modal, Row, Col } from 'react-bootstrap';
+import { Container, Form, Button, Card, ListGroup, Modal, Row, Col, Spinner, Alert } from 'react-bootstrap';
 import { AppContext } from '../context/AppContext';
+import CanvasEditor from '../components/CanvasEditor';
 
 const TemplateManager = () => {
   const { templates, addTemplate, updateTemplate, deleteTemplate } = useContext(AppContext);
@@ -8,18 +9,31 @@ const TemplateManager = () => {
   const [templateImage, setTemplateImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [regions, setRegions] = useState([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [endPos, setEndPos] = useState({ x: 0, y: 0 });
+  const [selectedRegion, setSelectedRegion] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [regionName, setRegionName] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [currentId, setCurrentId] = useState(null);
   const [validated, setValidated] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState(null);
+  const [editingRegion, setEditingRegion] = useState(null);
   
-  const canvasRef = useRef(null);
   const imageRef = useRef(null);
-  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (imagePreview && imageRef.current) {
+      const img = new Image();
+      img.onload = () => {
+        setImageLoading(false);
+      };
+      img.onerror = () => {
+        setImageError('Failed to load image');
+        setImageLoading(false);
+      };
+      img.src = imagePreview;
+    }
+  }, [imagePreview]);
 
   // Reset form
   const resetForm = () => {
@@ -30,6 +44,7 @@ const TemplateManager = () => {
     setEditMode(false);
     setCurrentId(null);
     setValidated(false);
+    setSelectedRegion(null);
   };
 
   // Handle image upload
@@ -37,79 +52,71 @@ const TemplateManager = () => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setTemplateImage(file);
+      setImageLoading(true);
+      setImageError(null);
       
       const reader = new FileReader();
       reader.onload = (event) => {
         setImagePreview(event.target.result);
       };
+      reader.onerror = () => {
+        setImageError('Failed to read file');
+        setImageLoading(false);
+      };
       reader.readAsDataURL(file);
     }
   };
 
-  // Handle mouse events for region selection
-  const handleMouseDown = (e) => {
-    if (!imagePreview) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    setIsDrawing(true);
-    setStartPos({ x, y });
-    setEndPos({ x, y });
-  };
-
-  const handleMouseMove = (e) => {
-    if (!isDrawing) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    setEndPos({ x, y });
-  };
-
-  const handleMouseUp = () => {
-    if (!isDrawing) return;
-    
-    setIsDrawing(false);
-    
-    // Only show modal if the selection has some size
-    if (Math.abs(endPos.x - startPos.x) > 10 && Math.abs(endPos.y - startPos.y) > 10) {
-      setShowModal(true);
-    }
-  };
-
   // Add a new region
-  const addRegion = () => {
+  const handleRegionCreated = (newRegion) => {
+    setRegions([...regions, newRegion]);
+    setSelectedRegion(newRegion.id);
+    setEditingRegion(newRegion);
+    setShowModal(true);
+  };
+
+  // Handle region selection
+  const handleRegionSelected = (id) => {
+    setSelectedRegion(id);
+  };
+
+  // Handle region update (move/resize)
+  const handleRegionUpdated = (updatedRegions) => {
+    setRegions(updatedRegions);
+  };
+
+  // Add a new region name
+  const addRegionName = () => {
     if (!regionName.trim()) {
-      alert('Please enter a region name');
       return;
     }
     
-    // Calculate normalized coordinates (0-1) for responsive positioning
-    const imageWidth = imageRef.current.width;
-    const imageHeight = imageRef.current.height;
+    if (editingRegion) {
+      setRegions(regions.map(r => 
+        r.id === editingRegion.id
+          ? { ...r, name: regionName }
+          : r
+      ));
+    }
     
-    const newRegion = {
-      id: Date.now(),
-      name: regionName,
-      coordinates: {
-        x1: Math.min(startPos.x, endPos.x) / imageWidth,
-        y1: Math.min(startPos.y, endPos.y) / imageHeight,
-        x2: Math.max(startPos.x, endPos.x) / imageWidth,
-        y2: Math.max(startPos.y, endPos.y) / imageHeight
-      }
-    };
-    
-    setRegions([...regions, newRegion]);
     setRegionName('');
     setShowModal(false);
+    setEditingRegion(null);
+  };
+
+  // Edit a region name
+  const startEditRegionName = (region) => {
+    setRegionName(region.name);
+    setEditingRegion(region);
+    setShowModal(true);
   };
 
   // Remove a region
   const removeRegion = (id) => {
     setRegions(regions.filter(region => region.id !== id));
+    if (selectedRegion === id) {
+      setSelectedRegion(null);
+    }
   };
 
   // Handle form submission
@@ -120,6 +127,13 @@ const TemplateManager = () => {
     if (form.checkValidity() === false || !imagePreview || regions.length === 0) {
       e.stopPropagation();
       setValidated(true);
+      return;
+    }
+
+    // Check if all regions have names
+    const unnamedRegions = regions.filter(r => !r.name.trim());
+    if (unnamedRegions.length > 0) {
+      alert('All regions must have names. Please name all regions before saving.');
       return;
     }
 
@@ -190,80 +204,83 @@ const TemplateManager = () => {
               </Form.Control.Feedback>
             </Form.Group>
 
-            {imagePreview && (
+            {imageError && (
+              <Alert variant="danger" className="mt-3">
+                {imageError}
+              </Alert>
+            )}
+
+            {imageLoading && (
+              <div className="text-center my-3">
+                <Spinner animation="border" role="status">
+                  <span className="visually-hidden">Loading...</span>
+                </Spinner>
+              </div>
+            )}
+
+            {imagePreview && !imageLoading && (
               <>
                 <h5 className="mt-4">Define Regions</h5>
                 <p>Click and drag on the image to define regions where text will be placed.</p>
                 
-                <div 
-                  ref={containerRef}
-                  className="canvas-container"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseUp}
-                >
-                  <img 
-                    ref={imageRef}
-                    src={imagePreview} 
-                    alt="Certificate Template" 
-                    style={{ maxWidth: '100%' }}
-                  />
-                  
-                  {isDrawing && (
-                    <div 
-                      className="selection-box"
-                      style={{
-                        left: Math.min(startPos.x, endPos.x) + 'px',
-                        top: Math.min(startPos.y, endPos.y) + 'px',
-                        width: Math.abs(endPos.x - startPos.x) + 'px',
-                        height: Math.abs(endPos.y - startPos.y) + 'px'
-                      }}
-                    ></div>
-                  )}
-                  
-                  {regions.map((region) => {
-                    // Convert normalized coordinates back to pixels for display
-                    const imageWidth = imageRef.current ? imageRef.current.width : 0;
-                    const imageHeight = imageRef.current ? imageRef.current.height : 0;
-                    
-                    return (
-                      <div 
-                        key={region.id}
-                        className="region-marker"
-                        style={{
-                          left: (region.coordinates.x1 * imageWidth) + 'px',
-                          top: (region.coordinates.y1 * imageHeight) + 'px',
-                          width: ((region.coordinates.x2 - region.coordinates.x1) * imageWidth) + 'px',
-                          height: ((region.coordinates.y2 - region.coordinates.y1) * imageHeight) + 'px'
-                        }}
-                      >
-                        {region.name}
-                      </div>
-                    );
-                  })}
-                </div>
+                <CanvasEditor 
+                  image={imagePreview}
+                  regions={regions}
+                  selectedRegion={selectedRegion}
+                  onRegionCreated={handleRegionCreated}
+                  onRegionSelected={handleRegionSelected}
+                  onRegionsUpdated={handleRegionUpdated}
+                />
                 
-                <div className="region-list">
-                  <h5 className="mt-3">Defined Regions</h5>
-                  {regions.length === 0 ? (
-                    <p>No regions defined yet. Click and drag on the image to create regions.</p>
-                  ) : (
-                    <ListGroup>
-                      {regions.map((region) => (
-                        <ListGroup.Item key={region.id} className="d-flex justify-content-between align-items-center">
-                          <span>{region.name}</span>
-                          <Button 
-                            variant="danger" 
-                            size="sm"
-                            onClick={() => removeRegion(region.id)}
-                          >
-                            Remove
-                          </Button>
-                        </ListGroup.Item>
-                      ))}
-                    </ListGroup>
-                  )}
+                <div className="region-list mt-3">
+                  <Card>
+                    <Card.Header className="d-flex justify-content-between align-items-center">
+                      <h5 className="mb-0">Defined Regions</h5>
+                      <small className="text-muted">{regions.length} regions</small>
+                    </Card.Header>
+                    <Card.Body>
+                      {regions.length === 0 ? (
+                        <p>No regions defined yet. Click and drag on the image to create regions.</p>
+                      ) : (
+                        <ListGroup>
+                          {regions.map((region) => (
+                            <ListGroup.Item 
+                              key={region.id} 
+                              className={`d-flex justify-content-between align-items-center ${region.id === selectedRegion ? 'active' : ''}`}
+                              onClick={() => setSelectedRegion(region.id)}
+                            >
+                              <span className="region-name-display">
+                                {region.name || <span className="text-danger">(Unnamed Region)</span>}
+                              </span>
+                              <div>
+                                <Button 
+                                  variant="outline-secondary" 
+                                  size="sm"
+                                  className="me-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditRegionName(region);
+                                  }}
+                                >
+                                  <i className="bi bi-pencil"></i>
+                                </Button>
+                                <Button 
+                                  variant="outline-danger" 
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeRegion(region.id);
+                                  }}
+                                >
+                                  <i className="bi bi-trash"></i>
+                                </Button>
+                              </div>
+                            </ListGroup.Item>
+                          ))}
+                        </ListGroup>
+                      )}
+                    </Card.Body>
+                  </Card>
                 </div>
               </>
             )}
@@ -273,7 +290,7 @@ const TemplateManager = () => {
                 variant="primary" 
                 type="submit" 
                 className="me-2"
-                disabled={!imagePreview || regions.length === 0}
+                disabled={!imagePreview || regions.length === 0 || imageLoading}
               >
                 {editMode ? 'Update Template' : 'Save Template'}
               </Button>
@@ -296,8 +313,23 @@ const TemplateManager = () => {
         ) : (
           templates.map((template) => (
             <Col md={4} key={template.id} className="mb-4">
-              <Card>
-                <Card.Img variant="top" src={template.image} alt={template.name} />
+              <Card className="h-100 template-card">
+                <div className="template-image-container">
+                  <Card.Img variant="top" src={template.image} alt={template.name} />
+                  {template.regions.map((region, idx) => (
+                    <div 
+                      key={idx}
+                      className="template-preview-region"
+                      style={{
+                        left: `${region.coordinates.x1 * 100}%`,
+                        top: `${region.coordinates.y1 * 100}%`,
+                        width: `${(region.coordinates.x2 - region.coordinates.x1) * 100}%`,
+                        height: `${(region.coordinates.y2 - region.coordinates.y1) * 100}%`
+                      }}
+                      title={region.name}
+                    ></div>
+                  ))}
+                </div>
                 <Card.Body>
                   <Card.Title>{template.name}</Card.Title>
                   <Card.Text>
@@ -310,14 +342,14 @@ const TemplateManager = () => {
                       className="me-2"
                       onClick={() => handleEdit(template)}
                     >
-                      Edit
+                      <i className="bi bi-pencil me-1"></i> Edit
                     </Button>
                     <Button 
                       variant="danger" 
                       size="sm"
                       onClick={() => handleDelete(template.id)}
                     >
-                      Delete
+                      <i className="bi bi-trash me-1"></i> Delete
                     </Button>
                   </div>
                 </Card.Body>
@@ -330,7 +362,7 @@ const TemplateManager = () => {
       {/* Modal for naming regions */}
       <Modal show={showModal} onHide={() => setShowModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Name this Region</Modal.Title>
+          <Modal.Title>{editingRegion?.name ? 'Edit Region Name' : 'Name this Region'}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form.Group>
@@ -340,6 +372,7 @@ const TemplateManager = () => {
               value={regionName} 
               onChange={(e) => setRegionName(e.target.value)} 
               placeholder="e.g., name, rollNumber, className"
+              autoFocus
             />
             <Form.Text className="text-muted">
               Name should match a candidate field (name, rollNumber, className) or a subject name.
@@ -350,11 +383,41 @@ const TemplateManager = () => {
           <Button variant="secondary" onClick={() => setShowModal(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={addRegion}>
-            Add Region
+          <Button variant="primary" onClick={addRegionName} disabled={!regionName.trim()}>
+            {editingRegion?.name ? 'Update' : 'Add Region'}
           </Button>
         </Modal.Footer>
       </Modal>
+
+      <style jsx global>{`
+        .template-image-container {
+          position: relative;
+          overflow: hidden;
+        }
+        
+        .template-preview-region {
+          position: absolute;
+          border: 1px solid rgba(40, 167, 69, 0.8);
+          background-color: rgba(40, 167, 69, 0.2);
+          pointer-events: none;
+        }
+        
+        .template-card {
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .template-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .region-name-display {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 150px;
+        }
+      `}</style>
     </Container>
   );
 };
