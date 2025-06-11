@@ -17,6 +17,9 @@ code {
   margin: 20px 0;
   border: 1px solid #ccc;
   overflow: hidden;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  background: #f9f9f9;
+  border-radius: 4px;
 }
 
 .selection-box {
@@ -24,6 +27,7 @@ code {
   border: 2px dashed red;
   background-color: rgba(255, 0, 0, 0.2);
   pointer-events: none;
+  z-index: 10;
 }
 
 .region-marker {
@@ -35,20 +39,38 @@ code {
   justify-content: center;
   color: green;
   font-weight: bold;
+  cursor: move;
+  z-index: 5;
+  transition: box-shadow 0.2s ease;
+}
+
+.region-marker:hover {
+  box-shadow: 0 0 5px rgba(0, 128, 0, 0.5);
 }
 
 .certificate-preview {
   max-width: 100%;
   margin: 20px 0;
   border: 1px solid #ddd;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
 }
 
 .table-responsive {
   margin-top: 20px;
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .nav-tabs {
   margin-bottom: 20px;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.nav-tabs .nav-link.active {
+  border-bottom: 2px solid #007bff;
+  color: #007bff;
+  font-weight: bold;
 }
 
 .form-group {
@@ -57,12 +79,22 @@ code {
 
 .btn-action {
   margin-right: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-action i {
+  margin-right: 5px;
 }
 
 .region-list {
   margin-top: 20px;
   max-height: 300px;
   overflow-y: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 10px;
 }
 
 .region-item {
@@ -70,15 +102,71 @@ code {
   border: 1px solid #ddd;
   margin-bottom: 5px;
   border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f8f9fa;
+  transition: background-color 0.2s ease;
+}
+
+.region-item:hover {
+  background-color: #e9ecef;
 }
 
 .certificate-container {
   position: relative;
   display: inline-block;
+  margin: 20px 0;
 }
 
 .certificate-text {
   position: absolute;
   color: black;
   font-weight: bold;
+  padding: 2px;
+  user-select: none;
+}
+
+.canvas {
+  border: 1px solid #ddd;
+  background-color: white;
+  display: block;
+  cursor: crosshair;
+}
+
+.toolbar {
+  padding: 10px;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.control-panel {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 15px;
+  margin: 20px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.region-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.region-title {
+  font-weight: bold;
+  flex-grow: 1;
+  margin-right: 10px;
+}
+
+.no-regions-message {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+  font-style: italic;
 }
