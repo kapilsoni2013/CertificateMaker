@@ -104,7 +104,7 @@ const CertificatePreview = ({ template, candidate }) => {
     
     html2canvas(canvasRef.current).then(canvas => {
       canvas.toBlob(blob => {
-        saveAs(blob, `certificate_${candidate.name.replace(/\\s+/g, '_')}.png`);
+        saveAs(blob, `certificate_${candidate.name.replace(/\s+/g, '_')}.png`);
       });
     });
   };
